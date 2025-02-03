@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "checkJs": true,
+    "outDir": "out/",
+    "module": "Node16"
+  },
+  "include": [
+    "./index.js"
+  ],
+}

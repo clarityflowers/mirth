@@ -7,6 +7,7 @@ import std.str
 import std.buffer
 import std.world
 import std.file
+import std.either
 
 #########
 # Input #
@@ -51,7 +52,7 @@ data +Input {
         INPUT_BUFFER_SIZE +Buffer.new >+buffer
         0u >USize   >length
         0u >UOffset >offset
-        +InputOpenState refill-buffer!
+        +InputOpenState +Input.Open
     }
 
     def stop! [ +Input -- +Input ] {
@@ -68,27 +69,50 @@ data +Input {
         { Done -> True +Input.Done }
     }
 
+    def prepare-for-more! [ +Input -- +Input ] {
+        { Open -> prepare-for-more! }
+        { Done -> +Input.Done }
+    }
+
     ||| Return the current char in the input buffer.
     ||| Returns NUL if the file is already exhausted.
     def peek [ +Input -- Byte +Input ] {
-        { Open -> offset +buffer:@U8 >Byte +Input.Open }
-        { Done -> Byte.BNUL +Input.Done }
+        prepare-for-more! match {
+            Open -> offset +buffer:@U8 >Byte +Input.Open,
+            Done -> Byte.BNUL +Input.Done
+        }
     }
 
     ||| Move to next char in input buffer.
     ||| Does nothing if the file is already exhausted.
     def move! [ +Input -- +Input ] {
-        { Open -> length:pred offset:1+ prepare-for-more! }
+        { Open -> length:pred offset:1+ +Input.Open }
         { Done -> +Input.Done }
     }
 
     ||| Read a chunk of input.
     def read-chunk! [ +Input -- Maybe(Str) +Input ] {
-        { Open ->
-            offset length +buffer:@Str Some
-            refill-buffer! }
-        { Done ->
-            None +Input.Done }
+        prepare-for-more! match {
+            Open -> offset length +buffer:@Str Some refill-buffer!,
+            Done -> None +Input.Done
+        }
+    }
+
+    def read-bytes! [ +Input USize -- Either(Str, Str) +Input] {
+        Str:!+str(
+            while-none(
+                if (0=,
+                    Yes Some,
+                    peek if(Byte.BNUL ==,
+                        drop No Some,
+                        @+str:push-byte-unsafe! 1- >USize-clamp None
+                        move!
+                    ),
+                )
+            )
+            dip:drop
+        )
+        swap if (Right, Left)
     }
 
     ||| Read the whole file.

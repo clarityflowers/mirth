@@ -90,6 +90,7 @@ inline def if(f, g, h) [ (*a b -- *a Bool, *a b -- *c, *a b -- *c) *a b -- *c ] 
     dup dip:f swap if(g, h)
 }
 
+
 inline def or(f,g,h) { or(f,or(g,h)) }
 inline def or(f,g,h,i) { or(f,or(g,or(h,i))) }
 inline def and(f,g,h) { and(f,and(g,h)) }
@@ -1298,7 +1299,7 @@ def(@?, Mut(t) -- Maybe(t),
 
 inline def panic! [*a Str -- *b] { prim-panic }
 
-inline def panic!(s) [(*a +Str -- *b +Str) *a -- *b] { 
+inline def panic!(s) [(*a +Str -- *b +Str) *a -- *c] { 
     Str(s) panic! 
 }
 

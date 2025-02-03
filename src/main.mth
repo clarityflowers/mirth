@@ -5,6 +5,7 @@ import std.list
 import std.posix
 import std.terminal
 
+import mirth.json
 import mirth.options
 import mirth.mirth
 import mirth.package
@@ -18,12 +19,20 @@ def main [ +World -- +World ] {
     parse-options! else(trace(unpack2 ; emit;) 1 posix-exit!)
 
     +Mirth.Init!
-    compile!
+
+    if(lsp, drop run-lsp!, compile!)
     rdrop
+}
+
+def run-lsp! [ +World +Mirth -- +World +Mirth ] {
+    !+mirth(
+        "{\"hello\": [-1, 2.5e3, true, false, null]}" parse-json print(repr;) drop
+    )
 }
 
 def compile! [ Options +World +Mirth -- +World +Mirth ] {
     /Options
+    lsp> drop
     package-search-paths> dup empty? then(
         drop "lib" >Path mirth-base-lib-path >List cons
     ) package-search-paths!

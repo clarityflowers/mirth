@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+
+
+import json
+from sys import stderr, stdout, stdin
+from itertools import count
+from os.path import abspath
+
+id = count()
+
+
+for message in [
+    {
+        "method": "initialize",
+        "id": next(id),
+        "params": {
+            "processId": None,
+            "rootUri": None,
+            "capabilities": {"general": {"positionEncodings": ["utf-8"]}},
+        },
+    },
+#     {
+#         "method": "textDocument/didOpen",
+#         "params": {
+#             "textDocument": {
+#                 "uri": "file://" + abspath("core.sw"),
+#                 "languageId": "sword",
+#                 "version": 0,
+#                 "text": r"""def EOF  0    
+# def \\   EOF 3 parse drop drop drop  
+#     immediate
+
+# \\ now we can use comments in our code
+
+
+# def test   1 +
+# def hello  5 *
+
+
+# define main
+#     3 test hello
+#     \\ this is a comment
+# end""",
+#             }
+#         },
+#     },
+#     {
+#         "method": "textDocument/semanticTokens/full",
+#         "id": next(id),
+#         "params": {"textDocument": {"uri": "file://" + abspath("core.sw")}},
+    # },
+#     {
+#         "method": "textDocument/didChange",
+#         "params": {
+#             "textDocument": {
+#                 "uri": "file://" + abspath("core.sw"),
+#                 "languageId": "sword",
+#                 "version": 1,
+#             },
+#             "contentChanges": [
+#                 {
+#                     "text": r"""def EOF  0    
+# def \\    EOF 3 parse drop drop drop  
+#     immediate
+
+# def ? .s 
+#     immediate
+
+# \\ now we can use comments in our code!!!
+
+# def test   3 *
+# def hello  8 *
+# ?
+# define main
+#     3 test hello
+#     \\ this is a comment
+# end""",
+#                 }
+#             ],
+#         },
+#     },
+#     {
+#         "method": "textDocument/semanticTokens/full",
+#         "id": next(id),
+#         "params": {"textDocument": {"uri": "file://" + abspath("core.sw")}},
+#     },
+#     {
+#         "method": "textDocument/didClose",
+#         "params": {"textDocument": {"uri": "file://" + abspath("core.sw")}},
+#     },
+    {"method": "shutdown", "id": next(id), "params": None},
+    {"method": "exit"},
+]:
+    content = json.dumps(message)
+    stdout.write(f"Content-Length: {len(content)}\r\n\r\n")
+    stdout.write(content)
+    stdout.flush()

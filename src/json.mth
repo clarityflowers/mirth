@@ -1,0 +1,437 @@
+||| Unvalidated json parsing on input streams
+module mirth.json
+
+import std.prelude
+import std.input
+import std.str
+import std.byte
+import std.list
+import std.map
+import std.maybe
+import std.file
+import std.ctypes
+import std.unicode
+
+
+
+
+||| I legitimately think it reads better lmao
+alias(Bool.n't, Bool.not)
+
+inline {
+  ||| Like `while/2` but f can transform the stack as long as g transforms it back
+  def while'(f,g) [ (*a -- *b Bool, *b -- *a) *a -- *b ] {
+    f while(dup, drop g f) drop
+  }
+}
+
+||| A json token
+data Token {
+  String [ Str ]
+  Number [ Str ]
+  ObjOpen
+  ObjClose
+  ArrayOpen
+  ArrayClose
+  Boolean [ Bool ]
+  Null
+  --
+
+  ||| Given a byte, return the associated token type
+  |||
+  ||| For tokens that contain strings, just fills it with an empty string to be parsed later
+  def identify [ Byte -- Maybe:Maybe:Token ] {
+    match {
+      BNUL -> None Some,
+      B'0' -> "" Token.Number Some Some,
+      B'1' -> "" Token.Number Some Some,
+      B'2' -> "" Token.Number Some Some,
+      B'3' -> "" Token.Number Some Some,
+      B'4' -> "" Token.Number Some Some,
+      B'5' -> "" Token.Number Some Some,
+      B'6' -> "" Token.Number Some Some,
+      B'7' -> "" Token.Number Some Some,
+      B'8' -> "" Token.Number Some Some,
+      B'9' -> "" Token.Number Some Some,
+      B'-' -> "" Token.Number Some Some,
+      BLCURLY -> Token.ObjOpen Some Some,
+      BRCURLY -> Token.ObjClose Some Some,
+      BLSQUARE -> Token.ArrayOpen Some Some,
+      BRSQUARE -> Token.ArrayClose Some Some,
+      BQUOTE -> "" Token.String Some Some,
+      B't' -> True Token.Boolean Some Some,
+      B'f' -> False Token.Boolean Some Some,
+      B'n' -> Token.Null Some Some,
+      _ -> drop None,
+    }
+  }
+
+  def repr; [ +Str Token -- +Str ] {
+    { String -> "\""; ; "\""; }
+    { Number -> ; }
+    { ObjOpen -> "{" ; }
+    { ObjClose -> "}" ; }
+    { ArrayOpen -> "[" ; }
+    { ArrayClose -> "]" ; }
+    { Boolean -> if("true", "false") ; }
+    { Null -> "null" ; }
+  }
+}
+
+
+
+
+||| A state machine
+data FloatParser {
+  Start Sign Digits Decimal Fraction E Esign Exponent
+  --
+
+
+  ||| `None` when done parsing
+  def step [ Byte FloatParser -- Maybe([FloatParser Bool]) ] {
+    {Start    -> Byte.B'-' == dip:FloatParser.Sign pack2 Some}
+    {Sign     -> Byte.B'0' == if(FloatParser.Decimal True, FloatParser.Digits True) pack2 Some}
+    {Digits   -> is-digit if(FloatParser.Digits True, FloatParser.Decimal False) pack2 Some}
+    {Decimal  -> Byte.BDOT == if(FloatParser.Fraction True, FloatParser.E False) pack2 Some}
+    {Fraction -> is-digit if(FloatParser.Fraction True, FloatParser.E False) pack2 Some}
+    {E        -> or(Byte.B'E' ==, Byte.B'e' ==) if(FloatParser.Esign True pack2 Some, None)}
+    {Esign    -> Byte.B'-' == dip:FloatParser.Exponent pack2 Some}
+    {Exponent -> is-digit if(FloatParser.Exponent True pack2 Some, None)}
+  }
+
+  ||| Consumes all characters from the input that produce a valid float
+  |||
+  ||| Assumes the float is already valid
+  def parse [ +TokenStream -- +TokenStream Str ] {
+    FloatParser.Start Str(while-some'(dip:rdip:peek step, unpack2 then(rdip:peek push-byte-unsafe! rdip:move!)))
+  }
+}
+
+||| Consumes all characters from the input that produce a valid float
+|||
+||| Assumes the float is already valid
+||| Returns the remainder of the string on top of the stack and the parsed number above it
+def +TokenStream.parse-float [ +TokenStream -- +TokenStream Str ] {
+  FloatParser.parse 
+}
+
+def Str.>F64 { Str.>F64? unwrap:impossible! }
+
+
+
+||| Convert an ascii hex digit /[0-9a-fA-F]/ into its value
+def Byte.hex-unsafe [ Byte -- U8 ] {
+  >U8 if( 65u8 <, 48u8, if(97u8 <, 55u8, 87u8)) sub-wrap
+}
+
+||| Interpret the string as a hexadecimal number
+|||
+||| Assumes the string only contains valid characters /[0-9a-fA-F]/
+def Str.to-hex-unsafe [ Str -- Nat ] {
+  dip(0u) bytes-for(dip(16u *) hex-unsafe >Nat +)
+}
+
+||| Convert four ASCII hex digits into a number
+def Byte.hex-4-unsafe [ Byte Byte Byte Byte -- U32 ]{
+  dip3(hex-unsafe >U32 12u32 lshift) 
+  dip2(hex-unsafe >U32 8u32 lshift) 
+   dip(hex-unsafe >U32 4u32 lshift) 
+       hex-unsafe >U32 add-wrap add-wrap add-wrap
+}
+
+
+
+||| A stream of json tokens fed from an input stream
+struct +TokenStream {
+  out:Str
+  --
+  def +TokenStream.init! [ Str -- +TokenStream ] {
+    >out +TokenStream
+  }
+
+  def +TokenStream.end! [ +TokenStream -- Str ] {
+    /+TokenStream out>
+  }
+
+  ||| Call a function using a TokenStream
+  def process(f) [ (*a +TokenStream -- *b +TokenStream) *a Str -- *b Str ] {
+    +TokenStream.init! f end!
+  }
+
+  ||| Call a function on each token in the stream
+  def each(f) [ (*a +TokenStream Token -- *a +TokenStream) *a Str -- *a Str ] {
+    +TokenStream.process(while-some(next!, f))
+  }
+
+  def move! [ +TokenStream -- +TokenStream ] { 1u >USize out:unsafe:drop-bytes }
+  def peek { out first-byte unwrap(Byte.BNUL) }
+
+  def identify!? [ +TokenStream --  +TokenStream Maybe:Token ] { 
+    while-none(peek Token.identify, move!) 
+  }
+
+  def identify!  [ +TokenStream --  +TokenStream Token ] {
+    identify!? unwrap("Expected json token but reached end of string" panic!)
+  }
+
+  def parse-unicode-byte! [ +TokenStream -- +TokenStream Codepoint ] {
+    move! peek move! peek move! peek move! peek hex-4-unsafe >Codepoint-unsafe
+  }
+
+  def parse-char! [ +TokenStream +str:+Str -- +TokenStream +str:+Str ] {
+    peek match {
+      B'\' -> move! peek match{
+        B'b' -> Byte.BBS @+str:push-byte-unsafe!,
+        B'f' -> Byte.BFF @+str:push-byte-unsafe!,
+        B'n' -> Byte.BLF @+str:push-byte-unsafe!,
+        B'r' -> Byte.BCR @+str:push-byte-unsafe!,
+        B't' -> Byte.BHT @+str:push-byte-unsafe!,
+        B'u' -> parse-unicode-byte! @+str:emit;,
+        _ -> @+str:push-byte-unsafe!,
+      },
+      _ -> @+str:push-byte-unsafe!
+    }
+  }
+
+  def parse-string! [ +TokenStream -- +TokenStream Str ]  {
+    Str(>+str until(move! peek Byte.BQUOTE ==, parse-char!) +str>) move!
+  }
+
+  def next! [ +TokenStream --  +TokenStream Maybe:Token ] {
+    identify!?
+    map(match {
+      String -> drop parse-string! Token.String,
+      Number -> drop parse-float Token.Number,
+      _ -> move!,
+    })
+  }
+
+  def obj-close? [ +TokenStream -- +TokenStream Bool ] {
+    identify! match { ObjClose -> move! True, _ -> drop False }
+  }
+  def array-close? [ +TokenStream -- +TokenStream Bool ] {
+    identify! match { ArrayClose -> move! True, _ -> drop False }
+  }
+
+  def string! [ +TokenStream -- +TokenStream Str ] {
+    identify! match { 
+      String -> drop parse-string!, 
+      _ -> Str("Expected string, got "; repr;) panic!}
+  }
+
+  def object! [ +TokenStream -- +TokenStream Map(Str, JsonValue) ] {
+     Map.Nil >map until(obj-close?, string! >key value! >value KeyValuePair @map:insert) map>
+  }
+
+  def array! [ +TokenStream -- +TokenStream List:JsonValue ] {
+     List:until(rdip:array-close?, rdip:value! ;)
+  }
+
+  def value‽ [ +TokenStream -- +TokenStream Maybe:JsonValue ] {
+    next! map(match {
+      ObjOpen -> object! JsonValue.Object,
+      ArrayOpen -> array! JsonValue.Array,
+      Number -> JsonValue.Number,
+      String -> JsonValue.String,
+      Null -> JsonValue.Null,
+      Boolean -> JsonValue.Boolean,
+      _ -> panic!("Received unexpected json token "; repr;)
+    })
+  }
+
+  ||| Returns the next complete value from the stream, unsafely assuming there is one
+  def value! [ +TokenStream -- +TokenStream JsonValue ] {
+    value‽ unwrap("Expected a json value but reached end of stream" panic!)
+  }
+}
+
+
+def KeyValuePair.json-repr; [ +Str KeyValuePair(Str, JsonValue) -- +Str ] {
+  dup key repr; ":"; value json;
+}
+
+
+struct +Mapper(k, v) { 
+  +lister: +Lister:KeyValuePair(k, v)
+  --
+  def init [ -- +Mapper(k,v) ] {
+    +Lister.+Nil >+lister +Mapper
+  }
+  def ; [ +Mapper(k,v) k v -- +Mapper(k,v) ] {
+    >value >key KeyValuePair +lister:;
+  }
+  def done! [ +Mapper(k, v) -- Map(k, v)] { 
+    /+Mapper +lister> done! >pairs Map
+  }
+
+  def do!(f) [(*a +Mapper(k, v) -- *b +Mapper(k, v)) *a -- *b Map(k, v)] {
+    +Mapper.init f done!
+  }
+}
+
+def Map(f) [ (*a +Mapper(k, v) -- *b +Mapper(k, v)) *a -- *b Map(k, v)] {
+  +Mapper.do!:f 
+}
+
+
+||| Any possible json value
+data JsonValue {
+  Object [ Map(Str, JsonValue) ]
+  Array [ List(JsonValue) ]
+  Number [ Str ]
+  String [ Str ]
+  Boolean [ Bool ]
+  Null
+  --
+
+  def repr; [ +Str JsonValue -- +Str ] {
+    { Object -> 
+      "JsonValue.object( "; pairs 
+      for(/KeyValuePair key> repr; " "; value> repr; " ;";, " ";) 
+      " )"; 
+    }
+    { Array -> "JsonValue.array( "; for(repr; " ;";, " ";) " )"; }
+    { Number -> repr; " JsonValue.Number"; }
+    { String -> repr; " JsonValue.String"; }
+    { Boolean -> repr; " JsonValue.Boolean"; }
+    { Null -> "JsonValue.Null"; }
+  }
+
+  def object(f) [ (*a +Mapper(Str, JsonValue) -- *b +Mapper(Str, JsonValue)) *a -- *b JsonValue ] {
+    Map(f) JsonValue.Object
+  }
+
+
+  def array(f) [ (*a +Lister(JsonValue) -- *b +Lister(JsonValue)) *a -- *b JsonValue ] {
+    List(f) JsonValue.Array
+  }
+
+  def >Str [ JsonValue -- Str ] {
+    { String -> id }
+    { Number -> id }
+    { _ -> drop "bleh" }
+  }
+  def get [ JsonValue key:Str -- JsonValue ] {
+    { Object -> dip:key> lookup unwrap(JsonValue.Null) }
+    { _ -> drop key> drop JsonValue.Null }
+  }
+
+  def json; [ +Str JsonValue -- +Str ] { 
+    { Object -> "{"; pairs for(/KeyValuePair key> json; value> json;, ",";) "}"; }
+    { Array -> "["; for(json;, ",";) "]"; }
+    { Number -> ; }
+    { String -> json; }
+    { Boolean -> if("true","false") ; }
+    { Null -> "null"; }
+  }
+}
+
+def Str.parse-json [ Str -- Str JsonValue ] {
+  +TokenStream.process:value! swap
+}
+
+# def +Input.parse-json [ +Input -- +Input JsonValue ] {
+# }
+
+def F64.json; [ +Str F64 -- +Str ] { repr; }
+def Int.json; [ +Str Int -- +Str ] { repr; }
+def Bool.json; [ +Str Bool -- +Str ] { if("true","false") ; }
+def Str.json; [ +Str Str -- +Str ] { 
+  "\"";
+  bytes-for(match {
+    Byte.BLF -> "\\n";,
+    Byte.BCR -> "\\r";,
+    Byte.B'\' ->"\\\\";,
+    Byte.BQUOTE -> "\\\"";,
+    Byte.BHT -> "\\t";,
+    Byte.BFF -> "\\f";,
+    _ -> if(>Int 0x20 <, 
+      "\\u00"; to-hexdigits dip:push-byte-ascii! push-byte-ascii!,
+      push-byte-unsafe!
+    ),
+  })
+  "\"";
+}
+
+struct +JsonOut {
+  +str:+Str
+  --
+  def run(f) [ (*a +JsonOut -- *b +JsonOut) *a +Str -- *b +Str ] {
+    >+str +JsonOut f /+JsonOut +str>
+  }
+
+  inline def ;(f {json;}) [ (*a +Str t -- *b +Str ) *a +JsonOut t -- *b +JsonOut ] { 
+    +str:f 
+  }
+  def key; [ +JsonOut -- +JsonOut ] { Byte.BCOLON +str:push-byte-unsafe! }
+  def comma; [ +JsonOut -- +JsonOut ] { Byte.BCOMMA +str:push-byte-unsafe! }
+  def null; [ +JsonOut -- +JsonOut ] { "null" +str:; }
+
+  def obj(f) [ (*a +JsonObjOut -- *b +JsonObjOut) *a +JsonOut -- *b +JsonOut ] {
+    +JsonObjOut.enter f +JsonObjOut.exit
+  }
+  def arr(f) [ (*a +JsonArrOut -- *b +JsonArrOut) *a +JsonOut -- *b +JsonOut ] {
+    +JsonArrOut.enter f +JsonArrOut.exit
+  }
+
+}
+
+struct +JsonObjOut {
+  +out: +JsonOut
+  len:Int
+  --
+  def enter [ +JsonOut -- +JsonObjOut ] {
+    Byte.BLCURLY +str:push-byte-unsafe! >+out 0 >len +JsonObjOut
+  }
+  def exit [ +JsonObjOut -- +JsonOut ] {
+    /+JsonObjOut len> drop +out> Byte.BRCURLY +str:push-byte-unsafe!
+  }
+
+  def next; [ +JsonObjOut -- +JsonObjOut ] {
+    len 0 > then(+out:comma;)
+    len:1+
+  }
+
+  inline def ;(f {json;}) [ (*a +Str t -- *b +Str) *a +JsonObjOut Str t -- *b +JsonObjOut ] { 
+    next; +out(dip:;:json; key; ;:f)  
+  }
+  def obj(f) [ (*a +JsonObjOut -- *b +JsonObjOut) *a Str +JsonObjOut -- *b +JsonObjOut ] {
+    value(+JsonObjOut.enter f +JsonObjOut.exit) 
+  }
+  def value(f) [ (*a +JsonOut -- *b +JsonOut) *a Str +JsonObjOut -- *b +JsonObjOut ] {
+    next; +out(; key; f)
+  }
+  def null; [ +JsonObjOut Str -- +JsonObjOut ] {
+    next; +out(; key; null;)
+  }
+  def value?(f) [ (*a +JsonOut -- *b +JsonOut Maybe(c)) *a Str +JsonObjOut -- *b +JsonObjOut Maybe(c)] {
+    dip:rdip:Str:json(f) >key >val  match {
+      Some -> Some key> drop val> drop ,
+      None -> None next; +out(key> ; key; val> +str:;)
+    }
+    
+  }
+}
+struct +JsonArrOut {
+  +out: +JsonOut
+  len:Int
+  --
+  def enter [ +JsonOut -- +JsonArrOut ] {
+    Byte.BLSQUARE +str:push-byte-unsafe! >+out 0 >len +JsonArrOut
+  }
+  def exit [ +JsonArrOut -- +JsonOut ] {
+    /+JsonArrOut len> drop +out> Byte.BRSQUARE +str:push-byte-unsafe!
+  }
+
+  def next; [ +JsonArrOut -- +JsonArrOut ] {
+    len 0 > then(+out:comma;)
+    len:1+
+  }
+
+  inline def ;(f {json;}) { +out:;:f next; }
+}
+
+
+inline {
+  def +Str.json(f) { +JsonOut.run(f) }
+}

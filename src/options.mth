@@ -12,6 +12,7 @@ import std.result
 import arg-parser.parse
 import arg-parser.types
 
+
 struct Options {
     input-file: Path
     output-file: Maybe(Path)
@@ -19,6 +20,7 @@ struct Options {
     packages: List([Str Path])
     package-search-paths: List(Path)
     emit-debug-info: Bool
+    lsp: Bool
 }
 
 ||| Create a default initialized arguments table
@@ -30,6 +32,7 @@ def Options.default [ -- Options ] {
     "main" Some >entry-point
     L0 >packages
     L0 >package-search-paths
+    False >lsp
     Options
 }
 
@@ -42,6 +45,7 @@ def Options.repr; [ Options +Str -- +Str ] {
     emit-debug-info> repr; " >emit-debug-info " ;
     packages> repr;(pack2-repr;) " >packages " ;
     package-search-paths> repr; " >package-search-path " ;
+    lsp> repr; " >lsp " ;
     "Options";
 }
 
@@ -66,20 +70,22 @@ def compiler-parse-args [ +ArgumentParser(Options) Options Maybe(Str) ArgpOption
         swap for(>Path swap input-file!),
         dip(drop) ArgumentParsingError.TooManyArgs Some state:error!
     ),
-    LongOnly -> dup "debug" == if(
-        drop2 True swap emit-debug-info!,
-        drop2 ArgumentParsingError.UnknownArg Some state:error!
+    LongOnly -> dip:drop switch?(
+        case("debug", True swap emit-debug-info!)
+        case("lsp", True swap lsp!),
+        drop ArgumentParsingError.UnknownArg Some state:error!
     ),
     End ->
-        state positional-index 1 < then(
-            ArgumentParsingError.TooFewArgs Some state:error!
-        )
-        state arguments output-file else(
-            state arguments entry-point then(
-                "output-file" ArgumentParsingError.MissingArg Some state:error!
+        state arguments lsp else(
+            state positional-index 1 < then(
+                ArgumentParsingError.TooFewArgs Some state:error!
             )
-        )
-        drop,
+            state arguments output-file else(
+                state arguments entry-point then(
+                    "output-file" ArgumentParsingError.MissingArg Some state:error!
+                )
+            )
+        ) drop,
     _ -> drop drop ArgumentParsingError.UnknownArg Some state error! state!
 }
 
@@ -125,6 +131,13 @@ def parse-options! [ +World -- +World Result([ArgumentParsingError Str], Options
         "debug" ArgpOptionType.LongOnly >flag-type
         None >arg-doc
         "Emit debugging information during codegen" Some >doc
+        None >group
+        ArgpOption ;
+
+        "lsp" dup Some >name
+        ArgpOptionType.LongOnly >flag-type
+        None >arg-doc
+        "Run the language server" Some >doc
         None >group
         ArgpOption ;
     ) >options
