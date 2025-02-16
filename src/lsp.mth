@@ -1,0 +1,279 @@
+module mirth.lsp
+
+import std.prelude
+import std.maybe
+import std.map
+import std.str
+import std.either
+import std.input
+import std.output
+import std.byte
+import mirth.lexer
+
+
+import mirth.json
+
+
+    # "uri": "file:///Users/strangerelics/Projects/tools/mirth/src/lsp.mth",
+    #     "languageId": "mirth",
+    #     "version": 125,
+    #     "text": "module mirth.lsp\n\nimport std.prelude\nimport std.maybe\nimport std.map\nimport std.str\nimport std.either\nimport std.input\nimport std.output\nimport 
+
+
+data Request {
+  Initialize
+  Shutdown
+  Unknown
+  --
+  def parse [ JsonValue -- Request ] {
+    dup ->Str:"method" switch(
+      case("initialize", Request.Initialize)
+      case("shutdown"  , Request.Shutdown),
+      drop Request.Unknown
+    )
+    dip:drop
+  }
+
+  def repr; [ +Str Request -- +Str ] {
+    match {
+      Initialize -> "Initialize";,
+      Shutdown -> "Shutdown";,
+      Unknown -> "<UNKNOWN>";,
+    }
+    " Request";
+  }
+}
+
+data Notification {
+  Exit
+  Unknown
+  TextDocument/DidOpen [ uri:Str version:F64 text:Str ]
+  TextDocument/DidChange [ uri:Str version:Str text:Str ]
+  TextDocument/DidClose [ Str ]
+  --
+  def parse [ JsonValue -- Notification ] {
+    dup get:"params" >params 
+    ->Str:"method"
+    switch(
+      case("exit", Notification.Exit)
+      case("textDocument/didOpen",
+        @params get:"textDocument"
+        dup get:"uri" >Str     >uri
+        dup get:"version" >F64 >version
+            get:"text" >Str    >text
+        Notification.TextDocument/DidOpen
+      )
+      case("textDocument/didChange",
+        @params get:"textDocument"
+        dup get:"uri"     >Str >uri
+            get:"version" >Str >version
+        @params get:"contentChanges" >Array head unwrap:JsonValue.Null
+            get:"text" >Str >text
+        Notification.TextDocument/DidChange
+      )
+      case("textDocument/didClose",
+        @params get:"textDocument" get:"uri" >Str
+        Notification.TextDocument/DidClose)
+      ,
+      drop Notification.Unknown
+    )
+    params> drop
+  }
+  
+  def repr; [ +Str Notification -- +Str ] {
+    match {
+      Exit -> "Exit";,
+      Unknown -> "<UNKNOWN>";,
+      TextDocument/DidOpen -> 
+        uri>     repr; " >uri ";
+        version> repr; " >version ";
+        text>    repr; " >text ";
+        "TextDocument/DidOpen";,
+      TextDocument/DidChange ->
+        uri>     repr; " >uri ";
+        version> repr; " >version ";
+        text>    repr; " >text ";
+        "TextDocument/DidChange";,
+      TextDocument/DidClose ->
+        repr; " TextDocument/DidClose";
+    }
+    " Notification";
+  }
+}
+
+||| Pull a byte from the input stream
+||| True  Right  – the byte was matched
+||| False  Right  – EOF was hit
+||| Byte Left – some other byte encountered
+def +Input.get! [ +Input Byte -- +Input Either(Byte, Bool) ] {
+  >b peek Left
+  case(Byte.BNUL, False)
+  case(@b  , True)
+  b> drop
+  move!
+}
+
+||| Pull a byte from the input stream and check if it matches
+||| True  Some  – the byte was matched
+||| False  Some  – EOF was hit
+||| None       – some other byte encountered
+def +Input.get!? [ +Input Byte -- +Input Maybe(Bool) ] {
+  get! right?
+}
+
+||| Read until a given character or EOF
+||| Right – the byte was matched
+||| Left  – hit EOF before matching
+def +Input.until-or-eof! [ Byte +Input  -- Either(Str, Str) +Input ] {
+  >b
+  Str(>+str while-left(@b get!, @+str:push-byte-unsafe!) +str>) swap if(Right, Left)
+  b> drop
+}
+
+||| Read until a given character, panicking at EOF
+def +Input.until! [ Byte +Input  -- Str +Input ] {
+  until-or-eof! right("Unexpected EOF!" panic!)
+}
+
+||| Read until a given character or EOF, returning the number of bytes skipped (not counting the matched char)
+def +Input.count-to-or-eof! [ Byte +Input -- Either(Int, Int) +Input] {
+  0 >count while-none(dup get!?, @count:1+) dip:drop dip:count> if(Right, Left)
+}
+
+def +Input.count-to! [ Byte +Input -- Int +Input] {
+  count-to-or-eof! right("Unexpected EOF!" panic!)
+}
+
+||| True – found the byte
+||| False – reach EOF
+def +Input.skip-to-or-eof! [ Byte +Input -- Bool +Input ] {
+  while-none(dup get!?) dip:drop
+}
+
+||| Skip until the given byte, consuming that byte from the stream
+||| Panics at EOF
+def +Input.skip-to! [ Byte +Input -- +Input ] {
+  skip-to-or-eof! else("Unexpected EOF!" panic!)
+}
+
+def Str.consume(f) [ (*a +Str -- *b +Str) *a Str -- *b] {
+  thaw f freeze drop
+}
+
+
+
+||| So much parsing work just to get a single goddam int
+def +Input.lsp-header! [+Input -- Int +Input] {
+    until(Byte.BCOLON until! "Content-Length" == if(True, Byte.BLF skip-to! False))
+    while(peek Byte.BSPACE ==, move!)
+    Byte.BCR until! consume(dec-int? ok? bind:int? unwrap:panic!:"Content-Length was not integer")  move!
+    until(Byte.BLF count-to! 1 ==)
+}
+
+
+data Incoming {
+  Request [ id:JsonValue Request ]
+  Notification [ Notification ]
+  --
+  def parse [ JsonValue -- Incoming ] {
+    dup get:"id" match {
+      { Null -> Notification.parse Incoming.Notification }
+      { _ -> >id Request.parse Incoming.Request }
+    }
+  }
+
+  def repr; [ +Str Incoming -- +Str ] {
+    match {
+       Request -> repr; " id:"; id> repr;,
+       Notification -> repr;,
+    }
+    " Incoming";
+  }
+
+  def receive! [ +world:+World +Input -- +world:+World Incoming +Input] {
+    lsp-header!  >Nat-clamp >USize 
+    read-bytes! right:panic!("Unexpected EOF")
+    parse-json dip:drop
+    Incoming.parse
+  }
+}
+
+
+struct ErrorResponse {
+  code:Int message:Str
+  --
+  def emit; [ +JsonObjOut ErrorResponse -- +JsonObjOut ] {
+    /ErrorResponse "error" obj("code" code> ; "message" message> ;)
+  }
+}
+
+
+struct +LanguageServer {
+  +output:+Output
+  +input:+Input
+  --
+  def send!(f) [ (*a +world:+World +JsonOut -- *b +world:+World +JsonOut) *a +world:+World +LanguageServer -- *b +world:+World +LanguageServer ] {
+    rdip:Str:json(f) @+world:print(
+      "Content-Length: " ; dup num-bytes 2u >USize + repr; "\r\n\r\n" ; ; "\r" ;
+    )
+
+  }
+  def receive! [ +world:+World +LanguageServer -- +world:+World +LanguageServer Incoming ] {
+    +input:Incoming.receive!
+  }
+  def reply!(f,g) [ 
+    (
+      *a +world:+World Request +JsonOut -- *b +world:+World +JsonOut Maybe(ErrorResponse), 
+      *a +world:+World Notification -- *b +world:+World
+    ) 
+    *a +world:+World +LanguageServer -- *b +world:+World +LanguageServer ] {
+    receive! match {
+      Request -> send!:obj("id" id> ; "jsonrpc" "2.0"; "result" value?:f for:emit;),
+      Notification -> rdip:g
+    }
+  }
+
+  def init!(f) [ 
+    (*a +world:+World +JsonObjOut -- *a +world:+World +JsonObjOut)
+    *a +world:+World -- *a +world:+World +LanguageServer 
+  ] {
+    @+world(
+      stdin-file +Input.start! >+input
+      stdout-file +Output.start! >+output
+    )
+    +LanguageServer
+    until:reply!(
+      match { Initialize -> obj:f True None, _ -> "Message before initialize" panic! },
+      drop False
+    )
+  }
+  def loop!(f,g) [ 
+    (
+      *a Request +world:+World +JsonOut -- *a +world:+World +JsonOut Maybe(ErrorResponse), 
+      *a +world:+World Notification -- *a +world:+World
+    ) 
+    *a +world:+World +LanguageServer -- *a +world:+World 
+  ] {
+    until:reply!(match { Shutdown -> null; True None, _ -> f dip:False }, g False)
+    until(receive! match {
+      Request -> drop send!:obj("id" id> ; "error" obj("code" -32600 ; "message" "Server is shutting down" ;)) False,
+      Notification -> match {
+        Exit -> True,
+        _ -> drop False
+      }
+    })
+    /+LanguageServer
+    @+world(+input> +Input.end! close-file! +output> +Output.end! close-file!)
+  }
+
+  def run(init, request, notification) [ 
+    ( 
+      *a +world:+World +JsonObjOut -- *a +world:+World +JsonObjOut, 
+      *a Request +world:+World +JsonOut -- *a +world:+World +JsonOut Maybe(ErrorResponse), 
+      *a +world:+World Notification -- *a +world:+World 
+    )
+    *a +world:+World -- *a +world:+World
+  ] {
+    +LanguageServer.init!(init) loop!(request,notification)
+  }
+}

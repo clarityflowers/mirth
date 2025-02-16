@@ -4,24 +4,55 @@
     "name": "mirth",
     "displayName": "Mirth",
     "description": "Language support for the Mirth programming language",
-    "version": "0.0.1",
+    "version": "0.0.3",
+    "main": "index.js",
     "engines": {
-        "vscode": "^1.42.0"
+        "vscode": "^1.96.4"
     },
     "categories": [
         "Programming Languages"
     ],
+    "activationEvents": [
+        "onLanguage:mirth"
+    ],
     "contributes": {
-        "languages": [{
-            "id": "mirth",
-            "aliases": ["Mirth", "mirth"],
-            "extensions": [".mth"],
-            "configuration": "./language-configuration.json"
-        }],
-        "grammars": [{
-            "language": "mirth",
-            "scopeName": "source.mirth",
-            "path": "./syntaxes/mirth.tmLanguage.json"
-        }]
+        "configuration": {
+            "type": "object",
+            "properties": {
+                "mirth.path": {
+                    "scope": "resource",
+                    "type": "string",
+                    "description": "Path to the Mirth executable"
+                }
+            }
+        },
+        "languages": [
+            {
+                "id": "mirth",
+                "aliases": [
+                    "Mirth",
+                    "mirth"
+                ],
+                "extensions": [
+                    ".mth"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "mirth",
+                "scopeName": "source.mirth",
+                "path": "./syntaxes/mirth.tmLanguage.json"
+            }
+        ]
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.96.4",
+        "vscode": "^1.1.37"
+    },
+    "dependencies": {
+        "vscode-languageclient": "^9.0.1",
+        "which": "^5.0.0"
     }
 }

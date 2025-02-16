@@ -124,6 +124,11 @@ def while-left(f) [ (*c a -- *c Either(a,b)) *c a -- *c b ] {
     right? unwrap(impossible!)
 }
 
+def while-left(f, g) [ (*c -- *d Either(a,b), *d a -- *c) *c -- *d b ] {
+    while-some'(f dup left?, dip:drop g) right(impossible!)
+}
+
+
 def while-right(f) [ (*c b -- *c Either(a,b)) *c b -- *c a ] {
     Right while-some(dup right?, nip f)
     left? unwrap(impossible!)

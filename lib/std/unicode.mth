@@ -61,6 +61,9 @@ data Codepoint {
 
 ||| Convert a u32 into a codepoint without verifying it
 alias(U32.>Codepoint-unsafe, Codepoint.Unsafe)
+def Nat.>Codepoint-unsafe {
+    >U32-clamp Codepoint.Unsafe
+}
 
 ||| Convert an Int into a codepoint without verifying it
 def Int.>Codepoint-unsafe { >U32-wrap Codepoint.Unsafe }

@@ -4,7 +4,9 @@ import std.prelude
 import std.list
 import std.posix
 import std.terminal
+import std.maybe
 
+import mirth.json
 import mirth.options
 import mirth.mirth
 import mirth.package
@@ -13,17 +15,57 @@ import mirth.elab
 import mirth.name
 import mirth.specializer
 import mirth.c99
+import mirth.lsp
+
+
 
 def main [ +World -- +World ] {
     parse-options! else(trace(unpack2 ; emit;) 1 posix-exit!)
 
     +Mirth.Init!
-    compile!
+
+    if(lsp, drop run-lsp!, compile!)
     rdrop
+}
+
+def run-lsp! [ +World +Mirth -- +World +Mirth ] {
+    !+mirth:!+world:+LanguageServer.run(
+        "capabilities" obj(
+            "textDocumentSync" obj("openClose" True ; "change" 1 ;)
+        ),
+            #         \\{{"capabilities":{{
+            # \\  "textDocumentSync":{{"openClose":true,"change":1}},
+            # \\  "semanticTokensProvider":{{
+            # \\      "legend":{{
+            # \\          "tokenTypes": ["function", "keyword", "number", "comment"],
+            # \\          "tokenModifiers": ["definition", "defaultLibrary", "asm", "documentation"]
+            # \\      }},
+            # \\      "full": true,
+            # \\    P  "range": false
+            # \\  }}
+            # \\ ,"diagnosticProvider":{{
+            # \\    "interFileDependencies": true,
+            # \\    "workspaceDifagnostics": false
+            # \\  }}
+            # \\ ,"definitionProvider":true
+            # \\ ,"renameProvider":{{"prepareProvider": true}}
+            # \\ ,"referencesProvider":true
+            # \\ ,"hoverProvider": true
+            # \\ ,"documentSymbolProvider": true
+            # \\}}}}
+        match {
+            _ ->  -1000 >code Str("Unhandled request "; repr;) >message ErrorResponse Some
+        },
+        match {
+            # _ -> drop
+            _ -> @+world:trace("Unhandled notification "; repr;)
+        }
+    )
 }
 
 def compile! [ Options +World +Mirth -- +World +Mirth ] {
     /Options
+    lsp> drop
     package-search-paths> dup empty? then(
         drop "lib" >Path mirth-base-lib-path >List cons
     ) package-search-paths!

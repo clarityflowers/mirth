@@ -138,6 +138,12 @@ def while-none(f) [ (*a -- *a Maybe(b)) *a -- *a b ] {
     None until(drop f dup some?) unwrap(impossible!)
 }
 
+
+||| Like `while-some/2` but f can transform the stack as long as g transforms it back
+def while-some'(f,g) [ (*a -- *b Maybe:c, *b c -- *a) *a -- *b ] {
+    f while-some(dup, dip:drop g f) drop
+}
+
 inline def Bool.>Maybe (f) [ ( *a -- *a b ) *a Bool -- *a Maybe(b) ] {
     if(f Some, None)
 }
