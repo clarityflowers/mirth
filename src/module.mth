@@ -11,6 +11,7 @@ import mirth.package
 import mirth.token
 import mirth.mirth
 import mirth.def
+import mirth.word
 
 # mirth/data/module
 table(Module)
@@ -59,4 +60,21 @@ def Module.visible [ +Mirth Module Module -- +Mirth Bool ] {
     dup2 = # module is always visible to itself
     or(dup2 imports member)
     dip(drop2)
+}
+
+def Module.prim? [ +Mirth Module -- +Mirth Bool ] {
+    Module.path "<prim>" >Path =
+}
+
+def Module.for-tokens(f) [ (*a +Mirth Token -- *a +Mirth) *a +Mirth Module -- *a +Mirth ] {
+    Module.start until(dup module-end?, sip:f next) drop
+}
+
+patch Module {
+    def words(f) [ (*a module:Module +Mirth  Word -- *a module:Module +Mirth) *a +Mirth Module -- *a +Mirth ] {
+        !module:Word.for(
+            dup namespace-hard module-only? if?(@module =,No) if(f,drop) 
+        )
+        drop
+    }
 }

@@ -1,0 +1,116 @@
+||| Docs generation for mirth libraries
+module mirth.docs
+
+import std.prelude
+import std.path
+import std.str
+import std.maybe
+
+import mirth.mirth
+import mirth.module
+import mirth.data
+import mirth.word
+import mirth.typedef
+
+
+struct Docs {
+    output: Path
+    package: Name
+}
+
+struct +Docs {
+    +mirth:+Mirth
+    +world:+World
+    data:Docs
+
+    --
+
+    def init [ +World +Mirth output:Path -- +Docs ] {
+        >+mirth >+world >output Data +Docs
+    }
+
+    def end [ +Docs -- +World +Mirth ] {
+        /+Docs +world> +mirth> drop
+    }
+
+    ||| Access all of `+Docs` resources
+    def resources(f) [ 
+        (*a +mirth:+Mirth +world:+World -- *b +mirth:+Mirth +world:+World) 
+        *a +Docs -- *b +Docs 
+    ] {
+        /+Docs @data:dip:f +Docs
+    }
+
+    ||| Loop over all defined modules
+    def modules(f) [ 
+        (*a +Docs module:Module -- *a +Docs module:Module) *a +Docs -- *a +Docs
+    ] {
+        Module.for(!module:f drop)
+    }
+}
+
+def +Mirth.generate-docs [ +World +Mirth output:Path -- +World +Mirth ] {
+    +Docs.init
+
+    "Generate docs!" rdip:trace
+
+    # Data.for(
+    #     qname-hard Str:qname; rdip:trace
+    # )
+
+    modules(
+        @module qname Str(qname;) "std.map" = then(
+            @module name Str("# "; name;) rdip:print
+
+            "## Words" rdip:trace
+            @module words(
+                name Str("### `"; name; "`";) rdip:print
+            )
+
+            Data.for(
+                >data
+                @data qname-hard namespace module? if?(@module =,No) then(
+                    @data name Str("## `"; name; "`";) rdip:print
+                    Word.for(
+                        >word
+                        @word namespace-hard tycon? bind(match {
+                            { Data -> Some }
+                            { _ -> drop None }
+                        })
+                        
+                        if?(@data =,No) then(@word Str:docs; rdip:print-)
+                        word> drop
+                    )
+
+                )
+                data> drop
+            )
+        )
+    )
+}
+
+def Word.docs; [ +Mirth +Str module:Module Word -- +Mirth +Str module:Module ] {
+    >word
+    @word rdip:doc then?(
+        @word rdip:name "### `"; name; "` [ ";
+        @word rdip:type sig; " ]\n";
+        ; "\n";
+    )
+    word> drop
+}
+
+# def Module.docs [ +World +Mirth output:Path Module -- +World +Mirth ] {
+
+#     if(prim?,
+
+#         drop,
+
+#         dup qname Str:qname; rdip:trace
+#         for-tokens(
+#             name? then?(>Str rdip:trace)
+#         )
+#         "" rdip:trace
+#     )
+#     output> drop
+
+# }

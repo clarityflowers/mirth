@@ -13,17 +13,41 @@ struct KeyValuePair(k,v) {
     value: v
 }
 
+||| A key-value map implemented as a linear search list
 struct Map(k,v) {
     pairs: List(KeyValuePair(k,v))
     --
-    def Nil { L0 >pairs Map }
-    def len { pairs len }
+    ||| Create an empty map
+    def Nil [ -- Map(k,v) ] { L0 >pairs Map }
+
+    ||| Get the number of key-value pairs in the map
+    def len [ Map(k,v) -- Nat ] { pairs len }
+
+    ||| Just the keys from the map's key-value pairs. May contain duplicates.
     def keys { pairs map(key) }
+
+    ||| Just the values from the map's key-value pairs.
     def values { pairs map(value) }
+
+    ||| Insert a new key-value pair into the map
     def insert [ KeyValuePair(k,v) Map(k,v) -- Map(k,v) ] { pairs:cons }
+
+    ||| A shorthand way to insert a new key-value pair
+    |||
+    ||| Example:
+    |||
+    |||     Map.init insert("value" "key")
+    |||
+    def insert(f) [ (*a -- *b v k) *a Map(k,v) -- *b Map(k,v) ] { 
+        dip(f >key >value KeyValuePair) insert 
+    }
+
+    ||| Find a the first key-value pair that matches the given key
     def lookup-pair(keq {=}) [ (*c k k -- *c Bool) *c k Map(k,v) -- *c Maybe(KeyValuePair(k,v)) ] {
         pairs lookup(.key keq)
     }
+
+    ||| Find the first value that matches the given key
     def lookup(keq {=}) [ (*c k k -- *c Bool) *c k Map(k,v) -- *c Maybe(v) ] {
         lookup-pair(keq) map(value)
     }

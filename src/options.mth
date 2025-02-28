@@ -12,9 +12,36 @@ import std.result
 import arg-parser.parse
 import arg-parser.types
 
+data Output {
+    C [ Path ]
+    Docs [ Path ]
+    None
+    -- 
+    def repr; [ Output +Str -- +Str ] {
+        { C -> repr; " Output.C"; }
+        { Docs -> repr; " Output.Docs"; }
+        { None -> "Output.None"; }
+    }
+    def else(f) [ (*a -- *a) *a Output -- *a  ] {
+        { C -> drop }
+        { Docs -> drop }
+        { None -> f }
+    }
+    def c?(f, g) [ (*a Path -- *b, *a -- *b) *a Output -- *b ] {
+        { C -> f }
+        { Docs -> drop g }
+        { None -> g }
+    }
+    def docs?(f) [ (*a Path -- *a) *a Output -- *a ] {
+        { C -> drop }
+        { Docs -> f }
+        { None -> }
+    }
+}
+
 struct Options {
     input-file: Path
-    output-file: Maybe(Path)
+    output: Output
     entry-point: Maybe(Str)
     packages: List([Str Path])
     package-search-paths: List(Path)
@@ -26,7 +53,7 @@ struct Options {
 def Options.default [ -- Options ] {
     False >emit-debug-info
     "mirth.mth" >Path >input-file
-    None >output-file
+    Output.None >output
     "main" Some >entry-point
     L0 >packages
     L0 >package-search-paths
@@ -36,7 +63,7 @@ def Options.default [ -- Options ] {
 ||| Pretty print the contents of the arguments struct
 def Options.repr; [ Options +Str -- +Str ] {
     /Options
-    output-file> repr; " >output-file " ;
+    output> repr; " >output " ;
     input-file> repr; " >input-file " ;
     entry-point> repr; " >entry-point " ;
     emit-debug-info> repr; " >emit-debug-info " ;
@@ -55,7 +82,11 @@ def compiler-parse-args [ +ArgumentParser(Options) Options Maybe(Str) ArgpOption
                           +ArgumentParser(Options) Options ]
 {
     Short -> dip(swap) match {
-        { B'o' -> dip:map(>Path) output-file! }
+        { B'o' -> dip:if?(>Path Output.C, Output.None)  output!   }
+        { B'd' -> 
+            dip:if?(>Path Output.Docs, Output.None) output! 
+            None swap entry-point!
+        }
         { B'e' -> entry-point! }
         { B'c' -> nip None swap entry-point! }
         { B'p' -> swap for(parse-package-def swap packages:List.Cons) }
@@ -74,9 +105,9 @@ def compiler-parse-args [ +ArgumentParser(Options) Options Maybe(Str) ArgpOption
         state positional-index 1 < then(
             ArgumentParsingError.TooFewArgs Some state:error!
         )
-        state arguments output-file else(
+        state arguments output else(
             state arguments entry-point then(
-                "output-file" ArgumentParsingError.MissingArg Some state:error!
+                "output" ArgumentParsingError.MissingArg Some state:error!
             )
         )
         drop,
@@ -90,6 +121,14 @@ def parse-options! [ +World -- +World Result([ArgumentParsingError Str], Options
         Byte.B'o' ArgpOptionType.Short >flag-type
         "OUTPUT_FILE" Some >arg-doc
         "Test argument" Some >doc
+        None >group
+        ArgpOption ;
+
+
+        "docs" Some >name
+        Byte.B'd' ArgpOptionType.Short >flag-type
+        "DOCS_FOLDER" Some >arg-doc
+        "Generate documentation files for the code" Some >doc
         None >group
         ArgpOption ;
 

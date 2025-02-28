@@ -190,6 +190,14 @@ data Namespace {
         { Word -> drop None }
     }
 
+    def module-only? [ +Mirth Namespace -- +Mirth Maybe(Module) ] {
+        { Root -> None }
+        { Package -> drop None }
+        { Module -> Some }
+        { Tycon -> drop None }
+        { Word -> drop None }
+    }
+
     def tycon? [ Namespace -- Maybe(Tycon) ] {
         { Root -> None }
         { Package -> drop None }
